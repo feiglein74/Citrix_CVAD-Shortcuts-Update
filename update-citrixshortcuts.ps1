@@ -1,221 +1,65 @@
-<#
-.Synopsis
-    Citrix Verknüpfungen, die durch die Workspace App im Startmenü erstellt werden und vom User per Verknüpfung auf Desktop oder Taskbar verbunden wurden
-    werden durch dieses Script nachbearbeitet
+﻿<#
+.SYNOPSIS
+    Bearbeitet Citrix-Verknüpfungen nach, die von der Workspace App erstellt wurden.
 .DESCRIPTION
-   
+    Die Citrix Workspace App legt im Startmenü des Benutzers Verknüpfungen an, die auf SelfService.exe zeigen.
+    Hat der Benutzer diese an Taskleiste oder Desktop angeheftet, zeigen auch dort die Verknüpfungen auf SelfService.exe.
+
+    Das Script sucht im Startmenü, in der Taskleiste und auf dem Desktop des Benutzers nach solchen Verknüpfungen.
+    Existiert im allgemeinen Startmenü (ProgramData) eine Verknüpfung mit gleichem Dateinamen, werden deren
+    TargetPath und Arguments übernommen.
 .EXAMPLE
-    Beispiel für die Verwendung dieses Cmdlets
+    .\update-citrixshortcuts.ps1 -WhatIf
+    Zeigt an, welche Verknüpfungen geändert würden, ohne etwas zu ändern.
 .EXAMPLE
-    Ein weiteres Beispiel für die Verwendung dieses Cmdlets
+    .\update-citrixshortcuts.ps1
+    Passt die Verknüpfungen an.
 #>
+[CmdletBinding(SupportsShouldProcess)]
+param()
 
-
-function Pin-App {    param(
-    [string]$appname,
-    [switch]$unpin
-)
-try{
-    if ($unpin.IsPresent){
-        ((New-Object -Com Shell.Application).NameSpace('shell:::{4234d49b-0245-4df3-b780-3893943456e1}').Items() | ?{$_.Name -eq $appname}).Verbs() | ?{$_.Name.replace('&','') -match 'Von "Taskbar" l sen|Unpin from Taskbar'} | %{$_.DoIt()}
-        return "App '$appname' unpinned from Taskbar"
-    }else{
-        ((New-Object -Com Shell.Application).NameSpace('shell:::{4234d49b-0245-4df3-b780-3893943456e1}').Items() | ?{$_.Name -eq $appname}).Verbs() | ?{$_.Name.replace('&','') -match 'An "Taskbar" anheften|Pin to Taskbar'} | %{$_.DoIt()}
-        return "App '$appname' pinned to Taskbar"
-    }
-}catch{
-    Write-Error "Error Pinning/Unpinning App! (App-Name correct?)"
-}
-}
-
-function Get-PinApp {    param(
-    [string]$appname
-    
-)
-try{
-    if ($unpin.IsPresent){
-        ((New-Object -Com Shell.Application).NameSpace('shell:::{4234d49b-0245-4df3-b780-3893943456e1}').Items() | ?{$_.Name -eq $appname}).Verbs() | ?{$_.Name.replace('&','') -match 'Von "Taskbar" l sen|Unpin from Taskbar'} | %{$_.DoIt()}
-        return "App '$appname' unpinned from Taskbar"
-    }else{
-        ((New-Object -Com Shell.Application).NameSpace('shell:::{4234d49b-0245-4df3-b780-3893943456e1}').Items() | ?{$_.Name -eq $appname}).Verbs() | ?{$_.Name.replace('&','') -match 'An "Taskbar" anheften|Pin to Taskbar'} | %{$_.DoIt()}
-        return "App '$appname' pinned to Taskbar"
-    }
-}catch{
-    Write-Error "Error Pinning/Unpinning App! (App-Name correct?)"
-}
-}
-
-
-
-# Powershell snippet, verkn pfungen zu manipulieren
-function Get-Shortcut {
-param(
-$path = $null
-)
-
-$obj = New-Object -ComObject WScript.Shell
-
-if ($path -eq $null) {
-$pathUser = [System.Environment]::GetFolderPath('StartMenu')
-$pathCommon = $obj.SpecialFolders.Item('AllUsersStartMenu')
-$path = dir $pathUser, $pathCommon -Filter *.lnk -Recurse 
-}
-if ($path -is [string]) {
-$path = dir $path -Filter *.lnk
-}
-$path | ForEach-Object { 
-if ($_ -is [string]) {
-  $_ = dir $_ -Filter *.lnk
-}
-if ($_) {
-  $link = $obj.CreateShortcut($_.FullName)
-
-  $info = @{}
-  $info.Hotkey = $link.Hotkey
-  $info.TargetPath = $link.TargetPath
-  $info.LinkPath = $link.FullName
-  $info.Arguments = $link.Arguments
-  $info.Target = try {Split-Path $info.TargetPath -Leaf } catch { 'n/a'}
-  $info.Link = try { Split-Path $info.LinkPath -Leaf } catch { 'n/a'}
-  $info.WindowStyle = $link.WindowStyle
-  $info.IconLocation = $link.IconLocation
-
-  New-Object PSObject -Property $info
-}
-}
-}
-
-function Set-Shortcut {
-param(
-[Parameter(ValueFromPipelineByPropertyName=$true)]
-$LinkPath,
-$Hotkey,
-$IconLocation,
-$Arguments,
-$TargetPath
-)
-begin {
 $shell = New-Object -ComObject WScript.Shell
+
+# Referenz-Verknüpfungen aus dem allgemeinen Startmenü, nach Dateiname
+$commonLinks = @{}
+Get-ChildItem -Path ([Environment]::GetFolderPath('CommonPrograms')) -Filter *.lnk -Recurse | ForEach-Object {
+    if ($commonLinks.ContainsKey($_.Name)) {
+        Write-Verbose "Verknüpfung '$($_.Name)' mehrfach im allgemeinen Startmenü vorhanden, verwende '$($commonLinks[$_.Name])'"
+    } else {
+        $commonLinks[$_.Name] = $_.FullName
+    }
 }
 
-process {
-$link = $shell.CreateShortcut($LinkPath)
+function Update-CitrixShortcuts {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [string]$Label,
+        [string]$Path
+    )
 
-$PSCmdlet.MyInvocation.BoundParameters.GetEnumerator() |
-  Where-Object { $_.key -ne 'LinkPath' } |
-  ForEach-Object { $link.$($_.key) = $_.value }
-$link.Save()
-}
-}
+    Write-Host "::$Label::"
+    if (-not (Test-Path $Path)) {
+        Write-Verbose "Ordner '$Path' existiert nicht"
+        return
+    }
 
-$myUserName = $env:username
-$myUserProfile = $env:USERPROFILE
+    Get-ChildItem -Path $Path -Filter *.lnk -Recurse | ForEach-Object {
+        $link = $shell.CreateShortcut($_.FullName)
+        if ([IO.Path]::GetFileName($link.TargetPath) -ne 'SelfService.exe') { return }
+        if (-not $commonLinks.ContainsKey($_.Name)) { return }
 
-$myStartmenuPath = $myUserProfile + "\AppData\Roaming\Microsoft\Windows\Start Menu\Programs" 
-$myShortcuts = Get-ChildItem -Path $myStartmenuPath -filter *.lnk -Recurse
+        $source = $shell.CreateShortcut($commonLinks[$_.Name])
+        if ($link.TargetPath -eq $source.TargetPath -and $link.Arguments -eq $source.Arguments) { return }
 
-#$myShortcuts
-
-$myShortcutsExport = @()
-$myProgramLinks = @()
-
-$ProgramLinks = Get-ChildItem -path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" -Include *.lnk -Recurse
-foreach($programLink in $ProgramLinks) {
-$myProgramLinks += $programLink -replace ".*\\", ""
-}
-
-#$ProgramLinks
-
-
-write-host "::Startmenu::"
-foreach($myShortCut in $myShortcuts) {
-$myTarget = (Get-Shortcut -path $myShortcut)
-
-If ($myTarget.Target -eq "SelfService.exe") {
-    $myLinkPath = $myTarget.LinkPath -replace ".*\\", ""
-
-    if ($myLinkPath -in $myProgramLinks) {
-        $source = $myShortCut.FullName
-        #$myShortcut.FullName
-        #$myShortcut.DirectoryName
-        $myShortCut.FullName
-        ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myProgramShortcut = Get-Shortcut -path ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myTargetPath = $myProgramShortcut.TargetPath
-        $myTargetArguments = $myProgramShortcut.Arguments
-
-        Set-Shortcut -LinkPath $myShortCut.FullName -TargetPath $myTargetPath -Arguments $myTargetArguments
-        
-        #write-host $myTarget.LinkPath
-        #write-host $myTarget.Target
+        Write-Host "$($_.FullName) <- $($source.FullName)"
+        if ($PSCmdlet.ShouldProcess($_.FullName, "Ziel auf '$($source.TargetPath) $($source.Arguments)' setzen")) {
+            $link.TargetPath = $source.TargetPath
+            $link.Arguments = $source.Arguments
+            $link.Save()
         }
+    }
 }
 
-}
-
-
-#Taskbar
-$myTaskbarPath = $myUserProfile + "\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar" 
-$myShortcuts = Get-ChildItem -Path $myTaskbarPath -filter *.lnk -Recurse
-
-
-write-host "::Taskbar::"
-foreach($myShortCut in $myShortcuts) {
-$myTarget = Get-Shortcut -path $myShortcut
-
-If ($myTarget.Target -eq "SelfService.exe") {
-    $myLinkPath = $myTarget.LinkPath -replace ".*\\", ""
-
-    if ($myLinkPath -in $myProgramLinks) {
-        $source = $myShortCut.FullName
-        $myShortCut.FullName
-        ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myProgramShortcut = Get-Shortcut -path ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myTargetPath = $myProgramShortcut.TargetPath
-        $myTargetArguments = $myProgramShortcut.Arguments
-
-        Set-Shortcut -LinkPath $myShortCut.FullName -TargetPath $myTargetPath -Arguments $myTargetArguments
-        
-        #write-host $myTarget.LinkPath
-        #write-host $myTarget.Target
-        }
-    
-}
-
-}
-
-#Desktop
-$myDesktopPath = [Environment]::GetFolderPath("Desktop")
-$myShortcuts = Get-ChildItem -Path $myDesktopPath -filter *.lnk -Recurse
-
-write-host "::Desktop::"
-foreach($myShortCut in $myShortcuts) {
-
-$myTarget = Get-Shortcut -path $myShortcut
-
-
-If ($myTarget.Target -eq "SelfService.exe") {
-    $myLinkPath = $myTarget.LinkPath -replace ".*\\", ""
-
-    if ($myLinkPath -in $myProgramLinks) {
-        $source = $myShortCut.FullName
-        $myShortCut.FullName
-        ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myProgramShortcut = Get-Shortcut -path ($ProgramLinks | Where-Object Name -eq $myLinkPath).FullName
-        $myTargetPath = $myProgramShortcut.TargetPath
-        $myTargetArguments = $myProgramShortcut.Arguments
-
-        Set-Shortcut -LinkPath $myShortCut.FullName -TargetPath $myTargetPath -Arguments $myTargetArguments
-        
-        #write-host $myTarget.LinkPath
-        #write-host $myTarget.Target
-        }
-
-    
-}
-
-}
-
-
-
-
+Update-CitrixShortcuts -Label 'Startmenu' -Path ([Environment]::GetFolderPath('Programs'))
+Update-CitrixShortcuts -Label 'Taskbar' -Path (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar')
+Update-CitrixShortcuts -Label 'Desktop' -Path ([Environment]::GetFolderPath('Desktop'))

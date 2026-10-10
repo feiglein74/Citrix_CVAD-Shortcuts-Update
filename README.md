@@ -4,6 +4,22 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
 ![Citrix](https://img.shields.io/badge/Citrix-Workspace%20App-452170)
 
+Fixes Citrix Workspace App (CVAD) shortcuts pointing to `SelfService.exe` in the user's Start Menu, Taskbar and Desktop
+by copying target and arguments from the matching shortcut in the All Users Start Menu.
+
+## Quickstart
+
+```powershell
+.\update-citrixshortcuts.ps1 -WhatIf   # preview changes
+.\update-citrixshortcuts.ps1           # apply
+```
+
+Runs as the logged-on user, no admin rights required.
+
+> Detailed documentation is in German.
+
+---
+
 PowerShell-Script, das Verknüpfungen der **Citrix Workspace App** nachträglich korrigiert – im Startmenü, in der Taskleiste und auf dem Desktop des Benutzers.
 
 ## Problem
@@ -54,12 +70,3 @@ Desktop\App.lnk                                     ┘
 ```
 
 Das Script läuft im Kontext des angemeldeten Benutzers, zum Beispiel als Anmeldescript oder als geplante Aufgabe bei der Anmeldung.
-
-Beispielausgabe:
-
-```
-::Startmenu::
-C:\Users\max\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\App.lnk <- C:\ProgramData\Microsoft\Windows\Start Menu\Programs\App.lnk
-::Taskbar::
-::Desktop::
-```
